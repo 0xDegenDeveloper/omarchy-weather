@@ -138,10 +138,18 @@ Panel {
   // Shared hero/bar icon state, updated with each successful weather response.
   property string label: ""
 
-  // Re-checked often enough that the pill flips at sunrise and sunset
+  // Re-checked often enough that the popup flips at sunrise and sunset
   // without waiting for the forecast refresh.
   property double sunNowMs: Date.now()
-  readonly property string sunLabel: Model.sunBarLabel(dailyForecastReport, sunNowMs)
+  readonly property var sunEvent: Model.upcomingSunEvent(dailyForecastReport, sunNowMs)
+  readonly property string sunLine: {
+    var event = sunEvent
+    if (!event || !event.clock) return ""
+    var sunrise = event.kind === "sunrise"
+    var pattern = Commons.I18n.t(sunrise ? "elsewhen.sunriseAt" : "elsewhen.sunsetAt",
+                                  sunrise ? "Sunrise %1" : "Sunset %1")
+    return String(pattern).replace("%1", event.clock)
+  }
 
   // wttr's current conditions when available; open-meteo's (bundled with the
   // much faster daily forecast fetch) fill the hero while wttr is in flight.
@@ -742,6 +750,15 @@ Panel {
                 onClicked: root.clearLocation()
               }
             }
+          }
+
+          Text {
+            visible: root.sunLine !== ""
+            textFormat: Text.PlainText
+            text: root.sunLine
+            color: root.bar.foreground
+            font.family: root.bar.fontFamily
+            font.pixelSize: Style.font.title
           }
 
           Row {

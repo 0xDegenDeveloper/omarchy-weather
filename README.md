@@ -2,7 +2,7 @@
 
 Personal Omarchy bar widget, cloned from `omarchy.weather`.
 
-The pill keeps the weather icon and adds the next sun time beside it. Before sunrise it shows sunrise (`↑ 06:47`). From sunrise until sunset it shows sunset. After sunset it shows tomorrow's sunrise. On a vertical bar it stays icon-only.
+The bar pill stays the weather icon. Click it and the popup shows the next sun time with the other details: sunrise before dawn, sunset until dusk, then tomorrow's sunrise.
 
 Times come from the Open-Meteo daily forecast, in the weather location's own zone. The label is recomputed every 30 seconds, so it flips at the event without waiting for the next forecast refresh.
 

@@ -50,13 +50,6 @@ BarWidget {
   implicitWidth: button.implicitWidth
   implicitHeight: button.implicitHeight
 
-  // Empty on a vertical bar, where a clock reading does not fit the slot.
-  readonly property string sunLabel: {
-    if (root.vertical) return ""
-    var panel = panelLoader.item
-    return panel && panel.sunLabel ? panel.sunLabel : ""
-  }
-
   onBarChanged: injectPanel()
   onSettingsChanged: injectPanel()
 
@@ -76,9 +69,7 @@ BarWidget {
     anchors.fill: parent
     bar: root.bar
     text: panelLoader.item ? panelLoader.item.label : ""
-    labelText: root.sunLabel
-    // The icon slot stays tight. The clock reading needs the icon plus "↑ HH:mm".
-    slotSize: root.sunLabel !== "" ? Style.bar.iconSlot * 3 + Style.space(12) : Style.bar.statusSlot
+    slotSize: Style.bar.statusSlot
     // Tooltip suppressed because the panel is the detail view.
     tooltipText: ""
 

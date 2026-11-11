@@ -151,6 +151,10 @@ Panel {
     return String(pattern).replace("%1", event.clock)
   }
 
+  // The chart under the forecast. Kept separate from sunLine so both can stay
+  // on screen while the two placements are compared.
+  readonly property var daylight: Model.daylightCurve(dailyForecastReport, sunNowMs)
+
   // wttr's current conditions when available; open-meteo's (bundled with the
   // much faster daily forecast fetch) fill the hero while wttr is in flight.
   readonly property bool hasConfiguredCoordinates: !isNaN(parseFloat(String(configuredLocationState.latitude))) && !isNaN(parseFloat(String(configuredLocationState.longitude)))
@@ -220,6 +224,7 @@ Panel {
       + "&longitude=" + encodeURIComponent(String(lon))
       + "&daily=weather_code,temperature_2m_max,temperature_2m_min,sunrise,sunset"
       + "&current=temperature_2m,apparent_temperature,relative_humidity_2m,wind_speed_10m,weather_code,is_day"
+      + "&past_days=1"
       + "&forecast_days=4"
       + "&timezone=auto"
     dailyForecastProc.command = ["curl", "-fsS", "--max-time", "5", url]
@@ -752,6 +757,7 @@ Panel {
             }
           }
 
+          // Kept for comparison with the daylight section under the forecast.
           Text {
             visible: root.sunLine !== ""
             textFormat: Text.PlainText
@@ -960,6 +966,166 @@ Panel {
                 }
               }
             }
+          }
+        }
+      }
+
+      Rectangle {
+        visible: root.forecastDays.length > 0 && !!root.daylight
+        width: parent.width
+        height: Style.spacing.hairline
+        color: root.bar.foreground
+        opacity: 0.12
+      }
+
+      Column {
+        visible: !!root.daylight
+        width: parent.width
+        spacing: Style.space(10)
+
+        Item {
+          id: dayLabels
+          anchors.left: parent.left
+          anchors.right: parent.right
+          anchors.leftMargin: Style.space(16)
+          anchors.rightMargin: Style.space(16)
+          height: Math.max(prevEvent.implicitHeight, nextEvent.implicitHeight)
+
+          // Keep a label inside the chart, centered on its event, and push
+          // the later one right if the two would land on each other.
+          function eventX(fraction, labelWidth, earlierRight) {
+            var span = width
+            var x = fraction * span - labelWidth / 2
+            if (earlierRight !== undefined) x = Math.max(x, earlierRight + Style.space(8))
+            return Math.max(0, Math.min(x, Math.max(0, span - labelWidth)))
+          }
+
+          Row {
+            id: prevEvent
+            spacing: Style.space(8)
+            x: dayLabels.eventX(root.daylight ? root.daylight.prev.fraction : 0, implicitWidth)
+            Text {
+              textFormat: Text.PlainText
+              text: root.daylight && root.daylight.prev.kind === "sunset" ? "\ue34d" : "\ue34c"
+              color: root.bar.foreground
+              font.family: root.bar.fontFamily
+              font.pixelSize: Style.font.display
+              anchors.verticalCenter: parent.verticalCenter
+            }
+            Column {
+              anchors.verticalCenter: parent.verticalCenter
+              spacing: Style.space(2)
+              Text {
+                textFormat: Text.PlainText
+                text: root.daylight ? root.daylight.prev.clock : ""
+                color: root.bar.foreground
+                font.family: root.bar.fontFamily
+                font.pixelSize: Style.font.title
+              }
+              Text {
+                textFormat: Text.PlainText
+                text: root.daylight ? root.daylight.prev.when : ""
+                color: Qt.darker(root.bar.foreground, 1.5)
+                font.family: root.bar.fontFamily
+                font.pixelSize: Style.font.bodySmall
+              }
+            }
+          }
+
+          Row {
+            id: nextEvent
+            spacing: Style.space(8)
+            x: dayLabels.eventX(root.daylight ? root.daylight.next.fraction : 1, implicitWidth, prevEvent.x + prevEvent.implicitWidth)
+            Text {
+              textFormat: Text.PlainText
+              text: root.daylight && root.daylight.next.kind === "sunset" ? "\ue34d" : "\ue34c"
+              color: root.bar.foreground
+              font.family: root.bar.fontFamily
+              font.pixelSize: Style.font.display
+              anchors.verticalCenter: parent.verticalCenter
+            }
+            Column {
+              anchors.verticalCenter: parent.verticalCenter
+              spacing: Style.space(2)
+              Text {
+                textFormat: Text.PlainText
+                text: root.daylight ? root.daylight.next.clock : ""
+                color: root.bar.foreground
+                font.family: root.bar.fontFamily
+                font.pixelSize: Style.font.title
+              }
+              Text {
+                textFormat: Text.PlainText
+                text: root.daylight ? root.daylight.next.when : ""
+                color: Qt.darker(root.bar.foreground, 1.5)
+                font.family: root.bar.fontFamily
+                font.pixelSize: Style.font.bodySmall
+              }
+            }
+          }
+        }
+
+        Canvas {
+          id: dayCanvas
+          anchors.left: parent.left
+          anchors.right: parent.right
+          anchors.leftMargin: Style.space(16)
+          anchors.rightMargin: Style.space(16)
+          height: Style.space(64)
+          renderStrategy: Canvas.Cooperative
+
+          property color ink: root.bar ? root.bar.foreground : "#ffffff"
+
+          onInkChanged: requestPaint()
+          onWidthChanged: requestPaint()
+          onHeightChanged: requestPaint()
+          onVisibleChanged: requestPaint()
+
+          Connections {
+            target: root
+            function onDaylightChanged() { dayCanvas.requestPaint() }
+          }
+
+          onPaint: {
+            var ctx = getContext("2d")
+            ctx.reset()
+            var curve = root.daylight
+            if (!curve || width <= 0 || height <= 0) return
+
+            var pad = Style.space(4)
+            var baseline = height - pad
+            var amp = Math.max(1, height - pad * 2)
+            var set = curve.setFraction
+            function xAt(fraction) { return pad + fraction * (width - pad * 2) }
+            function yAt(fraction) { return baseline - Model.daylightHeight(fraction, set) * amp }
+
+            ctx.beginPath()
+            ctx.moveTo(xAt(0), baseline)
+            var steps = 64
+            var s
+            for (s = 0; s <= steps; s++) {
+              var fraction = (set * s) / steps
+              ctx.lineTo(xAt(fraction), yAt(fraction))
+            }
+            ctx.lineTo(xAt(set), baseline)
+            ctx.closePath()
+            ctx.fillStyle = Util.alpha(ink, 0.14)
+            ctx.fill()
+
+            ctx.beginPath()
+            ctx.moveTo(xAt(0), yAt(0))
+            for (s = 1; s <= steps; s++) ctx.lineTo(xAt(s / steps), yAt(s / steps))
+            ctx.strokeStyle = Util.alpha(ink, 0.85)
+            ctx.lineWidth = 2
+            ctx.lineJoin = "round"
+            ctx.stroke()
+
+            var nowX = xAt(curve.nowFraction)
+            var nowY = yAt(curve.nowFraction)
+            ctx.beginPath()
+            ctx.arc(nowX, nowY, Style.space(3.5), 0, Math.PI * 2)
+            ctx.fillStyle = ink
+            ctx.fill()
           }
         }
       }

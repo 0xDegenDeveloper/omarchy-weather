@@ -261,6 +261,120 @@ function sunBarLabel(dailyForecastReport, nowMs) {
   return (event.kind === "sunrise" ? "\u2191 " : "\u2193 ") + event.clock
 }
 
+function formatSpan(ms) {
+  var minutes = Math.max(0, Math.round(Math.abs(Number(ms) || 0) / 60000))
+  if (minutes <= 0) return "0m"
+  var hours = Math.floor(minutes / 60)
+  var mins = minutes % 60
+  if (hours <= 0) return mins + "m"
+  if (mins === 0) return hours + "h"
+  return hours + "h " + mins + "m"
+}
+
+// "in 7h 56m" while the event is ahead, "5h 44m ago" once it has passed.
+function relativeWhen(ms, future) {
+  if (formatSpan(ms) === "0m") return "now"
+  return future ? "in " + formatSpan(ms) : formatSpan(ms) + " ago"
+}
+
+// Every sunrise and sunset in the forecast, oldest first. Missing polar
+// times are skipped. Instants use the location's utc offset.
+function sunTimeline(dailyForecastReport) {
+  var daily = dailyForecastReport && dailyForecastReport.daily
+  if (!daily) return []
+  var offset = dailyForecastReport.utc_offset_seconds
+  var rises = daily.sunrise || []
+  var sets = daily.sunset || []
+  var count = Math.max(rises.length, sets.length)
+  var events = []
+  for (var i = 0; i < count; i++) {
+    var riseAt = parseLocationInstant(rises[i], offset)
+    var setAt = parseLocationInstant(sets[i], offset)
+    if (!isNaN(riseAt)) events.push({ kind: "sunrise", at: riseAt, clock: clockFromIso(rises[i]) })
+    if (!isNaN(setAt)) events.push({ kind: "sunset", at: setAt, clock: clockFromIso(sets[i]) })
+  }
+  events.sort(function(a, b) { return a.at - b.at })
+  return events
+}
+
+// Height of the daylight arch, 0 at night and at the horizon, 1 at solar
+// noon. The arch runs from fraction 0 (sunrise) to setFraction (sunset), so
+// a short day peaks left of the chart's middle.
+function daylightHeight(fraction, setFraction) {
+  var f = Number(fraction)
+  var set = Number(setFraction)
+  if (!(set > 0) || f < 0 || f > set) return 0
+  return Math.sin(Math.PI * (f / set))
+}
+
+// One daylight hump plus the night after it, from a sunrise to the next
+// sunrise. The header names whichever sunrise and sunset are the previous
+// and next events, so both times and both relative phrases are in one view.
+function daylightCurve(dailyForecastReport, nowMs) {
+  var now = typeof nowMs === "number" && isFinite(nowMs) ? nowMs : Date.now()
+  var events = sunTimeline(dailyForecastReport)
+  if (!events.length) return null
+
+  var prev = null
+  var next = null
+  for (var i = 0; i < events.length; i++) {
+    if (events[i].at <= now) prev = events[i]
+    else if (!next) next = events[i]
+  }
+  if (!prev || !next || prev.kind === next.kind) return null
+
+  var sunrise = prev.kind === "sunrise" ? prev : next.kind === "sunrise" ? next : null
+  var sunset = prev.kind === "sunset" ? prev : next.kind === "sunset" ? next : null
+  if (!sunrise || !sunset) return null
+
+  // The hump starts at the sunrise of the daylight that contains now, or
+  // the one that just ended. That is `sunrise` during the day, and the
+  // sunrise before the previous sunset at night.
+  var arcRise = sunrise
+  if (prev.kind === "sunset") {
+    arcRise = null
+    for (var j = events.length - 1; j >= 0; j--) {
+      if (events[j].kind === "sunrise" && events[j].at <= prev.at) {
+        arcRise = events[j]
+        break
+      }
+    }
+  }
+  if (!arcRise) return null
+
+  var arcSet = null
+  var arcNextRise = null
+  for (var k = 0; k < events.length; k++) {
+    if (!arcSet && events[k].kind === "sunset" && events[k].at > arcRise.at) arcSet = events[k]
+    if (arcSet && events[k].kind === "sunrise" && events[k].at > arcSet.at) {
+      arcNextRise = events[k]
+      break
+    }
+  }
+  if (!arcSet || !arcNextRise) return null
+
+  var span = arcNextRise.at - arcRise.at
+  if (!(span > 0)) return null
+  function frac(at) { return (at - arcRise.at) / span }
+
+  function eventView(event) {
+    return {
+      kind: event.kind,
+      clock: event.clock,
+      when: relativeWhen(event.at - now, event.at > now),
+      fraction: Math.max(0, Math.min(1, frac(event.at)))
+    }
+  }
+
+  return {
+    riseFraction: 0,
+    setFraction: frac(arcSet.at),
+    nowFraction: Math.max(0, Math.min(1, frac(now))),
+    prev: eventView(prev),
+    next: eventView(next)
+  }
+}
+
 function wttrNextForecastDays(report, todayString) {
   var days = report && report.weather ? report.weather : []
   var result = []
@@ -360,6 +474,11 @@ if (typeof module !== "undefined") {
     clockFromIso: clockFromIso,
     upcomingSunEvent: upcomingSunEvent,
     sunBarLabel: sunBarLabel,
+    formatSpan: formatSpan,
+    relativeWhen: relativeWhen,
+    sunTimeline: sunTimeline,
+    daylightHeight: daylightHeight,
+    daylightCurve: daylightCurve,
     wttrNextForecastDays: wttrNextForecastDays,
     buildForecastDays: buildForecastDays,
     bareTempForDay: bareTempForDay,

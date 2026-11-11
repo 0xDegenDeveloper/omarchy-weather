@@ -972,8 +972,9 @@ Panel {
           anchors.rightMargin: Style.space(16)
           height: Math.max(mark0.implicitHeight, mark1.implicitHeight, mark2.implicitHeight)
 
-          // Keep a label inside the chart, centered on its crossing, and push
-          // the later one right if the two would land on each other.
+          // Center the stack on its crossing. A label that would leave the
+          // card stops at the edge, and a later one shifts right if the two
+          // would overlap.
           function eventX(fraction, labelWidth, earlierRight) {
             var span = width
             var x = fraction * span - labelWidth / 2
@@ -987,64 +988,69 @@ Panel {
             return curve.markers[index]
           }
 
-          component SunMark: Row {
+          component SunMark: Column {
             id: mark
             property int markerIndex: -1
             readonly property var event: dayLabels.markerAt(markerIndex)
             visible: !!event
-            spacing: Style.space(8)
+            spacing: Style.space(2)
             opacity: event && event.role === "context" ? 0.62 : 1
+            width: Math.max(iconText.implicitWidth, clockText.implicitWidth, whenText.implicitWidth,
+                            relationText.visible ? relationText.implicitWidth : 0)
 
             Text {
+              id: iconText
+              anchors.horizontalCenter: parent.horizontalCenter
               textFormat: Text.PlainText
               text: mark.event ? (mark.event.kind === "sunset" ? "\ue34d" : "\ue34c") : ""
               color: root.bar.foreground
               font.family: root.bar.fontFamily
               font.pixelSize: Style.font.display
-              anchors.verticalCenter: parent.verticalCenter
             }
-            Column {
-              anchors.verticalCenter: parent.verticalCenter
-              spacing: Style.space(2)
-              Text {
-                textFormat: Text.PlainText
-                text: mark.event ? mark.event.clock : ""
-                color: root.bar.foreground
-                font.family: root.bar.fontFamily
-                font.pixelSize: Style.font.title
-              }
-              Text {
-                textFormat: Text.PlainText
-                text: mark.event ? mark.event.when : ""
-                color: Qt.darker(root.bar.foreground, 1.5)
-                font.family: root.bar.fontFamily
-                font.pixelSize: Style.font.bodySmall
-              }
-              Text {
-                textFormat: Text.PlainText
-                visible: mark.event && mark.event.relation !== ""
-                text: mark.event ? mark.event.relation : ""
-                color: Qt.darker(root.bar.foreground, 1.5)
-                font.family: root.bar.fontFamily
-                font.pixelSize: Style.font.bodySmall
-              }
+            Text {
+              id: clockText
+              anchors.horizontalCenter: parent.horizontalCenter
+              textFormat: Text.PlainText
+              text: mark.event ? mark.event.clock : ""
+              color: root.bar.foreground
+              font.family: root.bar.fontFamily
+              font.pixelSize: Style.font.title
+            }
+            Text {
+              id: whenText
+              anchors.horizontalCenter: parent.horizontalCenter
+              textFormat: Text.PlainText
+              text: mark.event ? mark.event.when : ""
+              color: Qt.darker(root.bar.foreground, 1.5)
+              font.family: root.bar.fontFamily
+              font.pixelSize: Style.font.bodySmall
+            }
+            Text {
+              id: relationText
+              anchors.horizontalCenter: parent.horizontalCenter
+              textFormat: Text.PlainText
+              visible: mark.event && mark.event.relation !== ""
+              text: mark.event ? mark.event.relation : ""
+              color: Qt.darker(root.bar.foreground, 1.5)
+              font.family: root.bar.fontFamily
+              font.pixelSize: Style.font.bodySmall
             }
           }
 
           SunMark {
             id: mark0
             markerIndex: 0
-            x: dayLabels.eventX(event ? event.fraction : 0, implicitWidth)
+            x: dayLabels.eventX(event ? event.fraction : 0, width)
           }
           SunMark {
             id: mark1
             markerIndex: 1
-            x: dayLabels.eventX(event ? event.fraction : 0, implicitWidth, mark0.x + mark0.implicitWidth)
+            x: dayLabels.eventX(event ? event.fraction : 0, width, mark0.x + mark0.width)
           }
           SunMark {
             id: mark2
             markerIndex: 2
-            x: dayLabels.eventX(event ? event.fraction : 0, implicitWidth, mark1.x + mark1.implicitWidth)
+            x: dayLabels.eventX(event ? event.fraction : 0, width, mark1.x + mark1.width)
           }
         }
 

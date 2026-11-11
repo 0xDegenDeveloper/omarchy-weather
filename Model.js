@@ -278,7 +278,8 @@ function relativeWhen(ms, future) {
 }
 
 // Every sunrise and sunset in the forecast, oldest first. Missing polar
-// times are skipped. Instants use the location's utc offset.
+// times are skipped. Instants use the location's utc offset. `day` is the
+// location's calendar date, taken from the naive ISO rather than the machine.
 function sunTimeline(dailyForecastReport) {
   var daily = dailyForecastReport && dailyForecastReport.daily
   if (!daily) return []
@@ -290,88 +291,170 @@ function sunTimeline(dailyForecastReport) {
   for (var i = 0; i < count; i++) {
     var riseAt = parseLocationInstant(rises[i], offset)
     var setAt = parseLocationInstant(sets[i], offset)
-    if (!isNaN(riseAt)) events.push({ kind: "sunrise", at: riseAt, clock: clockFromIso(rises[i]) })
-    if (!isNaN(setAt)) events.push({ kind: "sunset", at: setAt, clock: clockFromIso(sets[i]) })
+    if (!isNaN(riseAt)) events.push({ kind: "sunrise", at: riseAt, clock: clockFromIso(rises[i]), day: dayFromIso(rises[i]) })
+    if (!isNaN(setAt)) events.push({ kind: "sunset", at: setAt, clock: clockFromIso(sets[i]), day: dayFromIso(sets[i]) })
   }
   events.sort(function(a, b) { return a.at - b.at })
   return events
 }
 
-// Height of the daylight arch, 0 at night and at the horizon, 1 at solar
-// noon. The arch runs from fraction 0 (sunrise) to setFraction (sunset), so
-// a short day peaks left of the chart's middle.
-function daylightHeight(fraction, setFraction) {
-  var f = Number(fraction)
-  var set = Number(setFraction)
-  if (!(set > 0) || f < 0 || f > set) return 0
-  return Math.sin(Math.PI * (f / set))
+function dayFromIso(iso) {
+  var match = /^(\d{4}-\d{2}-\d{2})/.exec(String(iso || ""))
+  return match ? match[1] : ""
 }
 
-// One daylight hump plus the night after it, from a sunrise to the next
-// sunrise. The header names whichever sunrise and sunset are the previous
-// and next events, so both times and both relative phrases are in one view.
-function daylightCurve(dailyForecastReport, nowMs) {
-  var now = typeof nowMs === "number" && isFinite(nowMs) ? nowMs : Date.now()
-  var events = sunTimeline(dailyForecastReport)
-  if (!events.length) return null
+// Calendar date at the forecast location. Open-Meteo gives one offset for
+// the response; the spring-forward night is an hour off for that one day.
+function locationDay(ms, utcOffsetSeconds) {
+  var offset = Number(utcOffsetSeconds)
+  if (!isFinite(offset)) offset = 0
+  return new Date(ms + offset * 1000).toISOString().slice(0, 10)
+}
 
+function dayRelation(eventDay, today) {
+  if (!eventDay || !today || eventDay === today) return ""
+  var eventUtc = Date.parse(eventDay + "T00:00:00Z")
+  var todayUtc = Date.parse(today + "T00:00:00Z")
+  if (!isFinite(eventUtc) || !isFinite(todayUtc)) return ""
+  var days = Math.round((eventUtc - todayUtc) / 86400000)
+  if (days === 1) return "tomorrow"
+  if (days === -1) return "yesterday"
+  return ""
+}
+
+function eventOnDay(events, day, kind) {
+  for (var i = 0; i < events.length; i++) {
+    if (events[i].day === day && events[i].kind === kind) return events[i]
+  }
+  return null
+}
+
+// Hours of curve kept outside the first and last labeled crossing, so the
+// wave meets the horizon inside the card instead of at the corner.
+var SUN_CHART_PAD_MS = 3 * 60 * 60 * 1000
+
+// Signed height of the sun's path. +1 is the middle of the day, -1 is the
+// middle of the night, 0 is the horizon. Day and night each get their own
+// half-period, because a single 24h sine only crosses zero every 12 hours
+// and would miss sunrise and sunset except at the equinox. The peak is the
+// midpoint of sunrise and sunset (solar noon), not 12:00 on the clock.
+function solarHeight(curve, fraction) {
+  if (!curve || !curve.events) return 0
+  var span = curve.windowEnd - curve.windowStart
+  if (!(span > 0)) return 0
+  var t = curve.windowStart + Number(fraction) * span
+  var events = curve.events
   var prev = null
   var next = null
   for (var i = 0; i < events.length; i++) {
-    if (events[i].at <= now) prev = events[i]
+    if (events[i].at <= t) prev = events[i]
     else if (!next) next = events[i]
+  }
+  if (!prev || !next || prev.kind === next.kind) return 0
+  var gap = next.at - prev.at
+  if (!(gap > 0)) return 0
+  var wave = Math.sin(Math.PI * ((t - prev.at) / gap))
+  if (Math.abs(wave) < 1e-9) return 0
+  return prev.kind === "sunrise" ? wave : -wave
+}
+
+// Where `now` sits between the surrounding sunrise and sunset.
+function solarPhase(prev, next, now) {
+  if (!prev || !next || !(next.at > prev.at)) return ""
+  var progress = (now - prev.at) / (next.at - prev.at)
+  var day = prev.kind === "sunrise"
+  if (progress < 0.12) return day ? "Just after sunrise" : "Just after sunset"
+  // Night's "evening" runs a little further than the day's "morning":
+  // solar midnight is the trough, and 10pm is still on the way down to it.
+  if (day) {
+    if (progress < 0.35) return "Morning"
+    if (progress < 0.62) return "Midday"
+    if (progress < 0.85) return "Afternoon"
+    return "Just before sunset"
+  }
+  if (progress < 0.42) return "Evening"
+  if (progress < 0.65) return "Middle of the night"
+  if (progress < 0.85) return "Late night"
+  return "Almost sunrise"
+}
+
+// About 30 hours of a skewed sine: three hours of approach, one solar day,
+// three hours of departure. Before sunrise the slice is yesterday's sunset
+// through today's sunset. From sunrise on it is today's sunrise through
+// tomorrow's sunrise. The slice changes at sunrise.
+function daylightCurve(dailyForecastReport, nowMs) {
+  var now = typeof nowMs === "number" && isFinite(nowMs) ? nowMs : Date.now()
+  var events = sunTimeline(dailyForecastReport)
+  if (!events.length || !dailyForecastReport) return null
+
+  var today = locationDay(now, dailyForecastReport.utc_offset_seconds)
+  var todayRise = eventOnDay(events, today, "sunrise")
+  var todaySet = eventOnDay(events, today, "sunset")
+  if (!todayRise || !todaySet) return null
+
+  var yesterdaySet = null
+  var tomorrowRise = null
+  for (var i = 0; i < events.length; i++) {
+    if (events[i].kind === "sunset" && events[i].at < todayRise.at) yesterdaySet = events[i]
+    if (!tomorrowRise && events[i].kind === "sunrise" && events[i].at > todaySet.at) tomorrowRise = events[i]
+  }
+
+  var anchorStart = null
+  var anchorEnd = null
+  if (now < todayRise.at) {
+    if (!yesterdaySet) return null
+    anchorStart = yesterdaySet
+    anchorEnd = todaySet
+  } else {
+    if (!tomorrowRise) return null
+    anchorStart = todayRise
+    anchorEnd = tomorrowRise
+  }
+
+  var windowStart = anchorStart.at - SUN_CHART_PAD_MS
+  var windowEnd = anchorEnd.at + SUN_CHART_PAD_MS
+  var span = windowEnd - windowStart
+  if (!(span > 0) || now < windowStart || now > windowEnd) return null
+
+  var prev = null
+  var next = null
+  for (var n = 0; n < events.length; n++) {
+    if (events[n].at <= now) prev = events[n]
+    else if (!next) next = events[n]
   }
   if (!prev || !next || prev.kind === next.kind) return null
 
-  var sunrise = prev.kind === "sunrise" ? prev : next.kind === "sunrise" ? next : null
-  var sunset = prev.kind === "sunset" ? prev : next.kind === "sunset" ? next : null
-  if (!sunrise || !sunset) return null
-
-  // The hump starts at the sunrise of the daylight that contains now, or
-  // the one that just ended. That is `sunrise` during the day, and the
-  // sunrise before the previous sunset at night.
-  var arcRise = sunrise
-  if (prev.kind === "sunset") {
-    arcRise = null
-    for (var j = events.length - 1; j >= 0; j--) {
-      if (events[j].kind === "sunrise" && events[j].at <= prev.at) {
-        arcRise = events[j]
-        break
-      }
-    }
-  }
-  if (!arcRise) return null
-
-  var arcSet = null
-  var arcNextRise = null
-  for (var k = 0; k < events.length; k++) {
-    if (!arcSet && events[k].kind === "sunset" && events[k].at > arcRise.at) arcSet = events[k]
-    if (arcSet && events[k].kind === "sunrise" && events[k].at > arcSet.at) {
-      arcNextRise = events[k]
-      break
-    }
-  }
-  if (!arcSet || !arcNextRise) return null
-
-  var span = arcNextRise.at - arcRise.at
-  if (!(span > 0)) return null
-  function frac(at) { return (at - arcRise.at) / span }
-
-  function eventView(event) {
-    return {
+  var markers = []
+  for (var m = 0; m < events.length; m++) {
+    var event = events[m]
+    if (event.at < windowStart || event.at > windowEnd) continue
+    var role = "context"
+    if (event.at === prev.at && event.kind === prev.kind) role = "prev"
+    else if (event.at === next.at && event.kind === next.kind) role = "next"
+    // The previous and next crossings keep "6h ago" / "in 7h". A third
+    // crossing that already happened is just context, so it says when in
+    // the day it was instead of a long elapsed time.
+    var when = relativeWhen(event.at - now, event.at > now)
+    if (role === "context" && event.at <= now)
+      when = event.kind === "sunrise" ? "this morning" : "earlier"
+    markers.push({
       kind: event.kind,
       clock: event.clock,
-      when: relativeWhen(event.at - now, event.at > now),
-      fraction: Math.max(0, Math.min(1, frac(event.at)))
-    }
+      when: when,
+      relation: dayRelation(event.day, today),
+      role: role,
+      fraction: (event.at - windowStart) / span
+    })
   }
+  if (markers.length < 2) return null
 
   return {
-    riseFraction: 0,
-    setFraction: frac(arcSet.at),
-    nowFraction: Math.max(0, Math.min(1, frac(now))),
-    prev: eventView(prev),
-    next: eventView(next)
+    windowStart: windowStart,
+    windowEnd: windowEnd,
+    nowFraction: (now - windowStart) / span,
+    phase: solarPhase(prev, next, now),
+    events: events.map(function(event) { return { kind: event.kind, at: event.at } }),
+    markers: markers
   }
 }
 
@@ -477,7 +560,8 @@ if (typeof module !== "undefined") {
     formatSpan: formatSpan,
     relativeWhen: relativeWhen,
     sunTimeline: sunTimeline,
-    daylightHeight: daylightHeight,
+    solarHeight: solarHeight,
+    solarPhase: solarPhase,
     daylightCurve: daylightCurve,
     wttrNextForecastDays: wttrNextForecastDays,
     buildForecastDays: buildForecastDays,

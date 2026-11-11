@@ -981,7 +981,7 @@ Panel {
       Column {
         visible: !!root.daylight
         width: parent.width
-        spacing: Style.space(10)
+        spacing: Style.space(8)
 
         Item {
           id: dayLabels
@@ -989,9 +989,9 @@ Panel {
           anchors.right: parent.right
           anchors.leftMargin: Style.space(16)
           anchors.rightMargin: Style.space(16)
-          height: Math.max(prevEvent.implicitHeight, nextEvent.implicitHeight)
+          height: Math.max(mark0.implicitHeight, mark1.implicitHeight, mark2.implicitHeight)
 
-          // Keep a label inside the chart, centered on its event, and push
+          // Keep a label inside the chart, centered on its crossing, and push
           // the later one right if the two would land on each other.
           function eventX(fraction, labelWidth, earlierRight) {
             var span = width
@@ -1000,13 +1000,23 @@ Panel {
             return Math.max(0, Math.min(x, Math.max(0, span - labelWidth)))
           }
 
-          Row {
-            id: prevEvent
+          function markerAt(index) {
+            var curve = root.daylight
+            if (!curve || !curve.markers || index < 0 || index >= curve.markers.length) return null
+            return curve.markers[index]
+          }
+
+          component SunMark: Row {
+            id: mark
+            property int markerIndex: -1
+            readonly property var event: dayLabels.markerAt(markerIndex)
+            visible: !!event
             spacing: Style.space(8)
-            x: dayLabels.eventX(root.daylight ? root.daylight.prev.fraction : 0, implicitWidth)
+            opacity: event && event.role === "context" ? 0.62 : 1
+
             Text {
               textFormat: Text.PlainText
-              text: root.daylight && root.daylight.prev.kind === "sunset" ? "\ue34d" : "\ue34c"
+              text: mark.event ? (mark.event.kind === "sunset" ? "\ue34d" : "\ue34c") : ""
               color: root.bar.foreground
               font.family: root.bar.fontFamily
               font.pixelSize: Style.font.display
@@ -1017,14 +1027,22 @@ Panel {
               spacing: Style.space(2)
               Text {
                 textFormat: Text.PlainText
-                text: root.daylight ? root.daylight.prev.clock : ""
+                text: mark.event ? mark.event.clock : ""
                 color: root.bar.foreground
                 font.family: root.bar.fontFamily
                 font.pixelSize: Style.font.title
               }
               Text {
                 textFormat: Text.PlainText
-                text: root.daylight ? root.daylight.prev.when : ""
+                text: mark.event ? mark.event.when : ""
+                color: Qt.darker(root.bar.foreground, 1.5)
+                font.family: root.bar.fontFamily
+                font.pixelSize: Style.font.bodySmall
+              }
+              Text {
+                textFormat: Text.PlainText
+                visible: mark.event && mark.event.relation !== ""
+                text: mark.event ? mark.event.relation : ""
                 color: Qt.darker(root.bar.foreground, 1.5)
                 font.family: root.bar.fontFamily
                 font.pixelSize: Style.font.bodySmall
@@ -1032,36 +1050,20 @@ Panel {
             }
           }
 
-          Row {
-            id: nextEvent
-            spacing: Style.space(8)
-            x: dayLabels.eventX(root.daylight ? root.daylight.next.fraction : 1, implicitWidth, prevEvent.x + prevEvent.implicitWidth)
-            Text {
-              textFormat: Text.PlainText
-              text: root.daylight && root.daylight.next.kind === "sunset" ? "\ue34d" : "\ue34c"
-              color: root.bar.foreground
-              font.family: root.bar.fontFamily
-              font.pixelSize: Style.font.display
-              anchors.verticalCenter: parent.verticalCenter
-            }
-            Column {
-              anchors.verticalCenter: parent.verticalCenter
-              spacing: Style.space(2)
-              Text {
-                textFormat: Text.PlainText
-                text: root.daylight ? root.daylight.next.clock : ""
-                color: root.bar.foreground
-                font.family: root.bar.fontFamily
-                font.pixelSize: Style.font.title
-              }
-              Text {
-                textFormat: Text.PlainText
-                text: root.daylight ? root.daylight.next.when : ""
-                color: Qt.darker(root.bar.foreground, 1.5)
-                font.family: root.bar.fontFamily
-                font.pixelSize: Style.font.bodySmall
-              }
-            }
+          SunMark {
+            id: mark0
+            markerIndex: 0
+            x: dayLabels.eventX(event ? event.fraction : 0, implicitWidth)
+          }
+          SunMark {
+            id: mark1
+            markerIndex: 1
+            x: dayLabels.eventX(event ? event.fraction : 0, implicitWidth, mark0.x + mark0.implicitWidth)
+          }
+          SunMark {
+            id: mark2
+            markerIndex: 2
+            x: dayLabels.eventX(event ? event.fraction : 0, implicitWidth, mark1.x + mark1.implicitWidth)
           }
         }
 
@@ -1071,7 +1073,7 @@ Panel {
           anchors.right: parent.right
           anchors.leftMargin: Style.space(16)
           anchors.rightMargin: Style.space(16)
-          height: Style.space(64)
+          height: Style.space(96)
           renderStrategy: Canvas.Cooperative
 
           property color ink: root.bar ? root.bar.foreground : "#ffffff"
@@ -1092,41 +1094,78 @@ Panel {
             var curve = root.daylight
             if (!curve || width <= 0 || height <= 0) return
 
-            var pad = Style.space(4)
-            var baseline = height - pad
-            var amp = Math.max(1, height - pad * 2)
-            var set = curve.setFraction
-            function xAt(fraction) { return pad + fraction * (width - pad * 2) }
-            function yAt(fraction) { return baseline - Model.daylightHeight(fraction, set) * amp }
+            var pad = Style.space(6)
+            var mid = height / 2
+            var amp = Math.max(1, mid - pad)
+            var steps = 96
+            function xAt(fraction) { return fraction * width }
+            function heightAt(fraction) { return Model.solarHeight(curve, fraction) }
+            function yAt(fraction) { return mid - heightAt(fraction) * amp }
 
-            ctx.beginPath()
-            ctx.moveTo(xAt(0), baseline)
-            var steps = 64
+            var pts = []
             var s
             for (s = 0; s <= steps; s++) {
-              var fraction = (set * s) / steps
-              ctx.lineTo(xAt(fraction), yAt(fraction))
+              var fraction = s / steps
+              pts.push({ x: xAt(fraction), y: yAt(fraction), h: heightAt(fraction) })
             }
-            ctx.lineTo(xAt(set), baseline)
-            ctx.closePath()
-            ctx.fillStyle = Util.alpha(ink, 0.14)
-            ctx.fill()
+
+            function fillLobe(above) {
+              ctx.beginPath()
+              var drawing = false
+              for (var i = 0; i < pts.length; i++) {
+                var inside = above ? pts[i].h >= 0 : pts[i].h <= 0
+                if (inside) {
+                  if (!drawing) {
+                    ctx.moveTo(pts[i].x, mid)
+                    drawing = true
+                  }
+                  ctx.lineTo(pts[i].x, pts[i].y)
+                } else if (drawing) {
+                  ctx.lineTo(pts[i].x, mid)
+                  drawing = false
+                }
+              }
+              if (drawing) ctx.lineTo(pts[pts.length - 1].x, mid)
+              ctx.fillStyle = Util.alpha(ink, above ? 0.16 : 0.10)
+              ctx.fill()
+            }
+            fillLobe(true)
+            fillLobe(false)
 
             ctx.beginPath()
-            ctx.moveTo(xAt(0), yAt(0))
-            for (s = 1; s <= steps; s++) ctx.lineTo(xAt(s / steps), yAt(s / steps))
-            ctx.strokeStyle = Util.alpha(ink, 0.85)
+            ctx.setLineDash([Style.space(1.5), Style.space(4)])
+            ctx.moveTo(0, mid)
+            ctx.lineTo(width, mid)
+            ctx.strokeStyle = Util.alpha(ink, 0.45)
+            ctx.lineWidth = 1
+            ctx.stroke()
+            ctx.setLineDash([])
+
+            ctx.beginPath()
+            ctx.moveTo(pts[0].x, pts[0].y)
+            for (s = 1; s < pts.length; s++) ctx.lineTo(pts[s].x, pts[s].y)
+            ctx.strokeStyle = Util.alpha(ink, 0.9)
             ctx.lineWidth = 2
             ctx.lineJoin = "round"
+            ctx.lineCap = "round"
             ctx.stroke()
 
             var nowX = xAt(curve.nowFraction)
             var nowY = yAt(curve.nowFraction)
             ctx.beginPath()
-            ctx.arc(nowX, nowY, Style.space(3.5), 0, Math.PI * 2)
+            ctx.arc(nowX, nowY, Style.space(4), 0, Math.PI * 2)
             ctx.fillStyle = ink
             ctx.fill()
           }
+        }
+
+        Text {
+          anchors.horizontalCenter: parent.horizontalCenter
+          textFormat: Text.PlainText
+          text: root.daylight ? root.daylight.phase : ""
+          color: Qt.darker(root.bar.foreground, 1.35)
+          font.family: root.bar.fontFamily
+          font.pixelSize: Style.font.bodySmall
         }
       }
     }

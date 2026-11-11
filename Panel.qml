@@ -141,18 +141,9 @@ Panel {
   // Re-checked often enough that the popup flips at sunrise and sunset
   // without waiting for the forecast refresh.
   property double sunNowMs: Date.now()
-  readonly property var sunEvent: Model.upcomingSunEvent(dailyForecastReport, sunNowMs)
-  readonly property string sunLine: {
-    var event = sunEvent
-    if (!event || !event.clock) return ""
-    var sunrise = event.kind === "sunrise"
-    var pattern = Commons.I18n.t(sunrise ? "elsewhen.sunriseAt" : "elsewhen.sunsetAt",
-                                  sunrise ? "Sunrise %1" : "Sunset %1")
-    return String(pattern).replace("%1", event.clock)
-  }
 
-  // The chart under the forecast. Kept separate from sunLine so both can stay
-  // on screen while the two placements are compared.
+  // Day and night under the forecast. The curve crosses the horizon at the
+  // sunrise and sunset labels.
   readonly property var daylight: Model.daylightCurve(dailyForecastReport, sunNowMs)
 
   // wttr's current conditions when available; open-meteo's (bundled with the
@@ -755,16 +746,6 @@ Panel {
                 onClicked: root.clearLocation()
               }
             }
-          }
-
-          // Kept for comparison with the daylight section under the forecast.
-          Text {
-            visible: root.sunLine !== ""
-            textFormat: Text.PlainText
-            text: root.sunLine
-            color: root.bar.foreground
-            font.family: root.bar.fontFamily
-            font.pixelSize: Style.font.title
           }
 
           Row {

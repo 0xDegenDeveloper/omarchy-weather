@@ -212,6 +212,55 @@ function weatherResponseCompletesSave(hasConfiguredCoordinates, source) {
   return hasConfiguredCoordinates ? source === "open-meteo" : source === "wttr"
 }
 
+// Open-Meteo sunrise/sunset values are naive local times ("2026-11-10T06:47")
+// in the forecast location's zone. utc_offset_seconds turns that clock time
+// into an instant. Without an offset, fall back to the machine's local zone.
+function parseLocationInstant(iso, utcOffsetSeconds) {
+  var match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/.exec(String(iso || ""))
+  if (!match) return NaN
+  var offset = Number(utcOffsetSeconds)
+  if (!isFinite(offset)) {
+    var parsed = Date.parse(String(iso))
+    return isNaN(parsed) ? NaN : parsed
+  }
+  return Date.UTC(+match[1], +match[2] - 1, +match[3], +match[4], +match[5]) - offset * 1000
+}
+
+function clockFromIso(iso) {
+  var match = /T(\d{2}):(\d{2})/.exec(String(iso || ""))
+  return match ? match[1] + ":" + match[2] : ""
+}
+
+// The next sunrise or sunset still ahead of nowMs. A missing time (polar day
+// or night) is skipped. After today's sunset this returns tomorrow's sunrise
+// when the daily forecast includes it.
+function upcomingSunEvent(dailyForecastReport, nowMs) {
+  var daily = dailyForecastReport && dailyForecastReport.daily
+  if (!daily) return null
+  var rises = daily.sunrise || []
+  var sets = daily.sunset || []
+  var count = Math.max(rises.length, sets.length)
+  if (!count) return null
+
+  var offset = dailyForecastReport.utc_offset_seconds
+  var now = typeof nowMs === "number" && isFinite(nowMs) ? nowMs : Date.now()
+  for (var i = 0; i < count; i++) {
+    var riseAt = parseLocationInstant(rises[i], offset)
+    var setAt = parseLocationInstant(sets[i], offset)
+    if (!isNaN(riseAt) && now < riseAt)
+      return { kind: "sunrise", clock: clockFromIso(rises[i]), at: riseAt }
+    if (!isNaN(setAt) && now < setAt)
+      return { kind: "sunset", clock: clockFromIso(sets[i]), at: setAt }
+  }
+  return null
+}
+
+function sunBarLabel(dailyForecastReport, nowMs) {
+  var event = upcomingSunEvent(dailyForecastReport, nowMs)
+  if (!event || !event.clock) return ""
+  return (event.kind === "sunrise" ? "\u2191 " : "\u2193 ") + event.clock
+}
+
 function wttrNextForecastDays(report, todayString) {
   var days = report && report.weather ? report.weather : []
   var result = []
@@ -307,6 +356,10 @@ if (typeof module !== "undefined") {
     currentIcon: currentIcon,
     provisionalCurrentIcon: provisionalCurrentIcon,
     weatherResponseCompletesSave: weatherResponseCompletesSave,
+    parseLocationInstant: parseLocationInstant,
+    clockFromIso: clockFromIso,
+    upcomingSunEvent: upcomingSunEvent,
+    sunBarLabel: sunBarLabel,
     wttrNextForecastDays: wttrNextForecastDays,
     buildForecastDays: buildForecastDays,
     bareTempForDay: bareTempForDay,

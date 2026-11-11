@@ -4,7 +4,7 @@
   "name": "My Weather",
   "version": "1.0.0",
   "author": "Omarchy",
-  "description": "Weather pill with detail popup",
+  "description": "Weather pill with the next sunrise or sunset",
   "kinds": [
     "bar-widget"
   ],
@@ -13,7 +13,7 @@
   },
   "barWidget": {
     "displayName": "My Weather",
-    "description": "Weather pill with detail popup",
+    "description": "Weather pill with the next sunrise or sunset",
     "category": "Info",
     "allowMultiple": false,
     "settingsForm": "weatherSettings"

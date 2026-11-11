@@ -138,6 +138,11 @@ Panel {
   // Shared hero/bar icon state, updated with each successful weather response.
   property string label: ""
 
+  // Re-checked often enough that the pill flips at sunrise and sunset
+  // without waiting for the forecast refresh.
+  property double sunNowMs: Date.now()
+  readonly property string sunLabel: Model.sunBarLabel(dailyForecastReport, sunNowMs)
+
   // wttr's current conditions when available; open-meteo's (bundled with the
   // much faster daily forecast fetch) fill the hero while wttr is in flight.
   readonly property bool hasConfiguredCoordinates: !isNaN(parseFloat(String(configuredLocationState.latitude))) && !isNaN(parseFloat(String(configuredLocationState.longitude)))
@@ -205,7 +210,7 @@ Panel {
     var url = "https://api.open-meteo.com/v1/forecast"
       + "?latitude=" + encodeURIComponent(String(lat))
       + "&longitude=" + encodeURIComponent(String(lon))
-      + "&daily=weather_code,temperature_2m_max,temperature_2m_min"
+      + "&daily=weather_code,temperature_2m_max,temperature_2m_min,sunrise,sunset"
       + "&current=temperature_2m,apparent_temperature,relative_humidity_2m,wind_speed_10m,weather_code,is_day"
       + "&forecast_days=4"
       + "&timezone=auto"
@@ -510,6 +515,14 @@ Panel {
           root.refresh()
       }
     }
+  }
+
+  Timer {
+    interval: 30000
+    repeat: true
+    running: true
+    triggeredOnStart: true
+    onTriggered: root.sunNowMs = Date.now()
   }
 
   Timer {

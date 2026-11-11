@@ -226,9 +226,16 @@ function parseLocationInstant(iso, utcOffsetSeconds) {
   return Date.UTC(+match[1], +match[2] - 1, +match[3], +match[4], +match[5]) - offset * 1000
 }
 
+// 12-hour clock with AM/PM. Midnight is 12:00 AM and noon is 12:00 PM.
+// The hour has no leading zero, matching the bar clock's "h:mm AP".
 function clockFromIso(iso) {
   var match = /T(\d{2}):(\d{2})/.exec(String(iso || ""))
-  return match ? match[1] + ":" + match[2] : ""
+  if (!match) return ""
+  var hour = +match[1]
+  var suffix = hour < 12 ? "AM" : "PM"
+  var hour12 = hour % 12
+  if (hour12 === 0) hour12 = 12
+  return hour12 + ":" + match[2] + " " + suffix
 }
 
 // The next sunrise or sunset still ahead of nowMs. A missing time (polar day
